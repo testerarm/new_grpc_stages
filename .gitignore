@@ -16,4 +16,9 @@ node3/*
 
 *.pyc
 *.json
-
+*.zip
+upload
+upload/*
+shark2/*
+shark2
+*.JPG
