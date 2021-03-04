@@ -6,6 +6,7 @@ import sys
 
 import cv2
 from joblib import Parallel, parallel_backend, delayed
+import psutil
 
 
 logger = logging.getLogger(__name__)
@@ -53,16 +54,21 @@ def memory_available():
 
     Only works on linux and returns None otherwise.
     """
+    """
     lines = os.popen('free -t -m').readlines()
     if not lines:
         return None
     available_mem = int(lines[1].split()[6])
+    """
+    mem = psutil.virtual_memory()
+    available_mem = mem.available / 1048576
     return available_mem
 
 
 def processes_that_fit_in_memory(desired, per_process):
     """Amount of parallel BoW process that fit in memory."""
     available_mem = memory_available()
+    #print(" Memory available from context calculation: "+ str(available_mem))
     if available_mem is not None:
         fittable = max(1, int(available_mem / per_process))
         return min(desired, fittable)

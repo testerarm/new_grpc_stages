@@ -33,8 +33,12 @@ def match_images(file_path, ref_images, cand_images, opensfm_config):
     """
 
     # Get EXIFs data
+
+    print('matching images before exif')
     all_images = list(set(ref_images+cand_images))
+    print('matching images right before load exif')
     exifs = {im: opensfm_interface.load_exif(file_path,im) for im in all_images}
+    print('matching images after')
 
     # Generate pairs for matching
 
@@ -51,6 +55,7 @@ def match_images(file_path, ref_images, cand_images, opensfm_config):
     #exit(1)
 
     # Match them !
+    print('match images now')
     ret = match_images_with_pairs(file_path ,opensfm_config, exifs, ref_images, pairs), preport
 
     #print('ret')
@@ -58,6 +63,7 @@ def match_images(file_path, ref_images, cand_images, opensfm_config):
     #print()
     #print()
     #exit(1)
+    print('finish match and returning')
 
     return ret
 
@@ -65,47 +71,51 @@ def match_images_with_pairs(file_path,opensfm_config, exifs, ref_images, pairs):
     """ Perform pair matchings given pairs. """
 
     # Store per each image in ref for processing
-    per_image = {im: [] for im in ref_images}
-    for im1, im2 in pairs:
-        per_image[im1].append(im2)
+    try:
+	    per_image = {im: [] for im in ref_images}
+	    for im1, im2 in pairs:
+		per_image[im1].append(im2)
 
-    ctx = Context()
-    #ctx.data = data
-    ctx.opensfm_config = opensfm_config
-    ctx.feature_path = file_path+'features'
-    ctx.file_path = file_path
+	    ctx = Context()
+	    #ctx.data = data
+	    ctx.opensfm_config = opensfm_config
+	    ctx.feature_path = file_path+'features'
+	    ctx.file_path = file_path
 
-    ctx.cameras = opensfm_interface.load_camera_models(file_path)
-    ctx.exifs = exifs
-    args = list(match_arguments(per_image, ctx))
+	    ctx.cameras = opensfm_interface.load_camera_models(file_path)
+	    ctx.exifs = exifs
+	    args = list(match_arguments(per_image, ctx))
 
 
     
 
-    # Perform all pair matchings in parallel
-    start = timer()
-    logger.info('Matching {} image pairs'.format(len(pairs)))
-    mem_per_process = 512
-    jobs_per_process = 2
-    processes = context.processes_that_fit_in_memory(opensfm_config['processes'], mem_per_process)
-    logger.info("Computing pair matching with %d processes" % processes)
-    matches = context.parallel_map(match_unwrap_args, args, processes, jobs_per_process)
-    logger.info(
-        'Matched {} pairs for {} ref_images {} '
-        'in {} seconds ({} seconds/pair).'.format(
-            len(pairs),
-            len(ref_images),
-            log_projection_types(pairs, ctx.exifs, ctx.cameras),
-            timer() - start,
-            (timer() - start) / len(pairs) if pairs else 0))
+	    # Perform all pair matchings in parallel
+	    start = timer()
+	    logger.info('Matching {} image pairs'.format(len(pairs)))
+	    mem_per_process = 1024
+	    jobs_per_process = 2
+	    processes = context.processes_that_fit_in_memory(opensfm_config['processes'], mem_per_process)
+	    logger.info("Computing pair matching with %d processes" % processes)
+	    matches = context.parallel_map(match_unwrap_args, args, processes, jobs_per_process)
+	    logger.info(
+		'Matched {} pairs for {} ref_images {} '
+		'in {} seconds ({} seconds/pair).'.format(
+		    len(pairs),
+		    len(ref_images),
+		    log_projection_types(pairs, ctx.exifs, ctx.cameras),
+		    timer() - start,
+		    (timer() - start) / len(pairs) if pairs else 0))
 
-    # Index results per pair
-    resulting_pairs = {}
-    for im1, im1_matches in matches:
-        for im2, m in im1_matches.items():
-            resulting_pairs[im1, im2] = m
+	    # Index results per pair
+	    resulting_pairs = {}
+	    for im1, im1_matches in matches:
+		for im2, m in im1_matches.items():
+		    resulting_pairs[im1, im2] = m
 
-    return resulting_pairs
+    	    return resulting_pairs
+    except Exception as e:
+	print(e.message)
+	print('exception in new matching paris')
 
 
 def log_projection_types(pairs, exifs, cameras):

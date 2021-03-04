@@ -861,6 +861,8 @@ if __name__ == '__main__':
 
 
         #create image list for this node
+
+	start = timer()
         submodel_creation._create_image_list(photo_list, images_filepath)
 
         
@@ -879,6 +881,7 @@ if __name__ == '__main__':
 
 
         clusters = submodel_creation.load_clusters_with_neighbors(images_filepath)
+	cluster_time = start - timer()
 
         print('clusters here')
         print(clusters)

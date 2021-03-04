@@ -16,14 +16,14 @@ from concurrent.futures import ThreadPoolExecutor
 import sys
 sys.path.append('../')
 sys.path.append('./opensfm/opensfm/')
-sys.path.append('/home/vm1/Desktop/ODM/SuperBuild/src/opensfm')
-sys.path.append('/home/vm1/Desktop/ODM/SuperBuild/install/lib/python2.7/dist-packages')
-sys.path.append('/home/vm1/Desktop/ODM/SuperBuild/install/lib')
+sys.path.append('/home/vm2/Desktop/ODM/SuperBuild/src/opensfm')
+sys.path.append('/home/vm2/Desktop/ODM/SuperBuild/install/lib/python2.7/dist-packages')
+sys.path.append('/home/vm2/Desktop/ODM/SuperBuild/install/lib')
 
 
 import sendFile_pb2, sendFile_pb2_grpc
 
-CHUNK_SIZE = 1024 * 1024  # 1MB
+CHUNK_SIZE = 1024 * 1024 * 4  # 1MB
 
 #from geopy import distance
 
@@ -267,6 +267,7 @@ Server Compute Functions
 def sfm_extract_metadata_list_of_images(image_path,  opensfm_config, node_file_path, image_list = []):
 
     try:
+	
         ref_image = os.listdir(image_path)
         if (len(image_list) > 0):
             ref_image = image_list
@@ -352,7 +353,7 @@ def sfm_feature_matching(current_path, ref_image, cand_images , opensfm_config):
 
     return 
 
-def sfm_feature_matching_pairs(current_path, ref_image, cand_images , opensfm_config):
+def sfm_feature_matching_pairs(current_path, pairs , opensfm_config):
 
     """
 
@@ -366,14 +367,17 @@ def sfm_feature_matching_pairs(current_path, ref_image, cand_images , opensfm_co
 
         # load exif is needed
         print('feature matching')
+	new_m ={}
+	for each in pairs: 
+		ref_image = [each[0],each[1]]
+        	pairs_matches, preport = new_matching.match_images(current_path+'/', ref_image, ref_image, opensfm_config)
+		new_m.update(pairs_matches)
+        #print(pairs_matches)
 
-        pairs_matches, preport = new_matching.match_images(current_path+'/', ref_image, ref_image, opensfm_config)
-        print(pairs_matches)
-
-        new_matching.save_matches(current_path+'/', ref_image, pairs_matches)
+        #new_matching.save_matches(current_path+'/', ref_image, pairs_matches)
 
         #tracking.load_matches(current_path, ref_image)
-        return pairs_matches
+        return new_m
     except Exception as e:
         print(traceback.print_exc())
         return None
@@ -909,7 +913,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
 
                     if(taskName == 'exif'):
                         # check 
-                        
+                            start = timer()
                             print('run sfm extract metadata')
                            
                             image_path =   req_node_path + '/images'
@@ -919,7 +923,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                             if (is_complete):
 
                                 #write time into json file timer
-                                end_timer = timer()-start_timer
+                                end_timer = timer()-start
                                 write_json({req_node_path+'exif': end_timer}, os.path.join(req_node_path, 'exif.json'))
 
                                 
@@ -933,6 +937,8 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                                 exif_list =  os.listdir(exif_folder_path)
                                 print(exif_list)
                                 exif_list.append('camera_models.json')
+				
+			        
 
                                 for each_file in exif_list:
                                     folder_path = exif_folder_path
@@ -967,6 +973,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                     elif(taskName == 'detect_features'):
 
                         print('detect features')
+			start = timer()
                        
                    
                         image_path = req_node_path + '/images'
@@ -980,7 +987,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         if(is_complete):
 
                             #write time into json file timer
-                            end_timer = timer()-start_timer
+                            end_timer = timer()-start
                             write_json({req_node_path+'detect_features': end_timer},"features.json")
 
                          
@@ -1017,9 +1024,9 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                     elif(taskName == 'feature_matching'):
 
                    
-                        image_path =   req_node_path + '/images'
+                        image_path = req_node_path + '/images'
                         print('image path ' + str(image_path))
-                        image_list =os.listdir(image_path)
+                        image_list = os.listdir(image_path)
                         detect_folder_path = req_node_path + '/features'
 
 
@@ -1051,25 +1058,29 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
 
 
                         return
-                    elif(taskName == 'feature_match_pairs'):
-
+                    elif(taskName == 'feature_matching_pairs'):
+			start = timer()
                         image_path =   req_node_path + '/images'
                         
                         print('image path ' + str(image_path))
                         #image_list =os.listdir(image_path)
-                        pair1 = request.feature_pair.pair1
-                        pair2 = request.feature_pair.pair2
+                        #pair1 = request.feature_pair.pair1
+                        #pair2 = request.feature_pair.pair2
 
-                        image_list = [pair1, pair2]
+                        
 
-                        print('pairs ' + str(pair1) + ' ' + str(pair2))
+                        #print('pairs ' + str(pair1) + ' ' + str(pair2))
 
-                        pairs_matches = sfm_feature_matching_pairs(req_node_path, image_list , image_list, opensfm_config)
+			lis = list(request.feature_pair)
+			pairs_matches = {}
+			for each in lis:
+                        	pairs_m = sfm_feature_matching_pairs(req_node_path,[(each.pair1, each.pair2)] ,opensfm_config)
+				pairs_matches.update(pairs_m)
                        
 
                         print('here in main taskName')
-                        #print(pairs_matches)
-                        filename = pair1+'-'+pair2
+                        print(pairs_matches)
+                        filename = str(node_id)
 
 
                         # save pair matches in a file 
@@ -1078,10 +1089,12 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         opensfm_interface.save_matches(req_node_path, filename, pairs_matches)
 
                         #write time into json file timer
-                        end_timer = timer()-start_timer
-                        write_json({req_node_path+'_feature_matching_pairs' + str(pair1) + '-' +str(pair2): end_timer}, str(pair1) + '-fp-' +str(pair2)+".json" )
+                        end_timer = timer()-start
+                        write_json({'_feature_matching_pairs' + filename: end_timer}, filename+'.json')
 
-
+                        #for key in pairs_matches:
+			#	print(key)
+			#print(len(pairs_matches))
 
                         detect_folder_path = req_node_path + '/matches'
                         with open(io.join_paths(detect_folder_path, filename+'_matches.pkl.gz'), 'rb') as f:
@@ -1419,7 +1432,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
 
     def start(self, port):
         print(port)
-        self.server.add_insecure_port('[::]:'+str(port))
+        self.server.add_insecure_port('[::]:5001')
         self.server.start()
 
         print("end of init")
