@@ -23,7 +23,7 @@ sys.path.append('/home/vm2/Desktop/ODM/SuperBuild/install/lib')
 
 import sendFile_pb2, sendFile_pb2_grpc
 
-CHUNK_SIZE = 1024 * 1024 * 4  # 1MB
+CHUNK_SIZE = 1024 * 1024 * 8  # 1MB
 
 #from geopy import distance
 
@@ -32,6 +32,7 @@ from opendm import log
 from opendm import system
 from opendm import io
 from opendm import gsd
+from opendm import types
 
 from collections import defaultdict
 
@@ -49,6 +50,9 @@ import mve_interface
 import mvs_texturing
 import filterpoint_interface
 import mesh_interface
+import export_visualsfm_helper
+import compute_depthmaps_helper
+import export_ply_helper
 
 import json
 
@@ -59,6 +63,34 @@ from timeit import default_timer as timer
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 print('dir path: ' + str(dir_path))
+
+
+def save_images_database(photos, database_file):
+    with open(database_file, 'w') as f:
+        f.write(json.dumps(map(lambda p: p.__dict__, photos)))
+    
+    log.ODM_INFO("Wrote images database: %s" % database_file)
+
+def load_images_database(database_file):
+    # Empty is used to create types.ODM_Photo class
+    # instances without calling __init__
+    class Empty:
+        pass
+
+    result = []
+
+    log.ODM_INFO("Loading images database: %s" % database_file)
+
+    with open(database_file, 'r') as f:
+        photos_json = json.load(f)
+        for photo_json in photos_json:
+            p = Empty()
+            for k in photo_json:
+                setattr(p, k, photo_json[k])
+            p.__class__ = types.ODM_Photo
+            result.append(p)
+
+    return result 
 
 
 def get_file_chunks(filename):
@@ -344,8 +376,8 @@ def sfm_feature_matching(current_path, ref_image, cand_images , opensfm_config):
 
         pairs_matches, preport = new_matching.match_images(current_path+'/', ref_image, ref_image, opensfm_config)
         print(pairs_matches)
-        new_matching.save_matches(current_path+'/', ref_image, pairs_matches)
-
+        #new_matching.save_matches(current_path+'/', ref_image, pairs_matches)
+	return pairs_matches
         #tracking.load_matches(current_path, ref_image)
     except Exception as e:
         print(traceback.print_exc())
@@ -507,8 +539,7 @@ def sfm_export_visual_sfm(current_path, opensfm_config, self_compute=False, self
 
 
     try:
-
-        opensfm_interface.open_export_visualsfm(current_path, opensfm_config)
+        export_visualsfm_helper.open_export_visualsfm(current_path, opensfm_config)
     except Exception as e:
         print(traceback.print_exc())
         return False
@@ -520,9 +551,9 @@ def sfm_compute_depthmaps(current_path, opensfm_config, self_compute=False, self
 
     try:
         if self_compute:
-            opensfm_interface.open_compute_depthmaps(current_path, opensfm_config, self_compute, self_path)
+            compute_depthmaps_helper.open_compute_depthmaps(current_path, opensfm_config, self_compute, self_path)
         else:
-            opensfm_interface.open_compute_depthmaps(current_path, opensfm_config)
+            compute_depthmaps_helper.open_compute_depthmaps(current_path, opensfm_config)
     except Exception as e:
         print(traceback.print_exc())
         return False
@@ -613,11 +644,11 @@ def odm_filterpoints_function(current_path, max_concurrency):
         return False
     return True
 
-def odm_mesh_function(current_path, max_concurrency):
+def odm_mesh_function(opensfm_config, current_path, max_concurrency, reconstruction):
 
 
     try:
-    
+    	opensfm_config['use_3dmesh']=False
         odm_filterpoints = os.path.join(current_path,'filterpoints')
         filterpoint_cloud = io.join_paths(odm_filterpoints, "point_cloud.ply")
 
@@ -625,8 +656,9 @@ def odm_mesh_function(current_path, max_concurrency):
         if not os.path.isdir(odm_mesh_folder):
             os.mkdir(odm_mesh_folder)
 
-        odm_mesh_ply = io.join_paths(odm_mesh_folder, "odm_mesh.ply")
-        mesh_interface.mesh_3d(odm_mesh_folder, odm_mesh_ply, filterpoint_cloud, max_concurrency)
+        #odm_mesh_ply = io.join_paths(odm_mesh_folder, "odm_mesh.ply")
+	odm_mesh_ply = io.join_paths(odm_mesh_folder, "odm_mesh.ply")
+        mesh_interface.mesh_3d(opensfm_config,odm_mesh_folder, odm_mesh_ply, filterpoint_cloud, max_concurrency, reconstruction, current_path)
     except Exception as e:
         print(traceback.print_exc())
         return False
@@ -651,6 +683,19 @@ def odm_texturing_function(current_path, submodel=False):
         return False
 
     return True
+
+def export_ply_function(current_path, opensfm_config, self_compute=False, self_path=''):
+
+    try:
+        if self_compute:
+            export_ply_helper.open_export_ply(current_path, opensfm_config, self_compute, self_path)
+        else:
+            export_ply_helper.open_export_ply(current_path, opensfm_config)
+    except Exception as e:
+        print(traceback.print_exc())
+        return False
+    
+    return True 
 
 
 
@@ -1066,21 +1111,31 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         #image_list =os.listdir(image_path)
                         #pair1 = request.feature_pair.pair1
                         #pair2 = request.feature_pair.pair2
+			pairs_ = request.feature_pair
+			
 
                         
 
                         #print('pairs ' + str(pair1) + ' ' + str(pair2))
 
-			lis = list(request.feature_pair)
+			#lis = list(request.feature_pair)
+			
+			#print(lis)
 			pairs_matches = {}
-			for each in lis:
+			for each in request.feature_pair:
                         	pairs_m = sfm_feature_matching_pairs(req_node_path,[(each.pair1, each.pair2)] ,opensfm_config)
 				pairs_matches.update(pairs_m)
+			
+
                        
 
-                        print('here in main taskName')
-                        print(pairs_matches)
+                        #print('here in main taskName')
+                        #print(pairs_matches)
+		        print('matches_length ' + str(len(pairs_matches)))
+			print('####################################')
                         filename = str(node_id)
+			
+
 
 
                         # save pair matches in a file 
@@ -1090,7 +1145,9 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
 
                         #write time into json file timer
                         end_timer = timer()-start
-                        write_json({'_feature_matching_pairs' + filename: end_timer}, filename+'.json')
+                        write_json({'_feature_matching_pairs' + filename: end_timer}, 'featurematchingpairs'+'.json')
+
+			
 
                         #for key in pairs_matches:
 			#	print(key)
@@ -1104,7 +1161,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                                             break
                                         yield sendFile_pb2.NewChunk(filename=filename+'_matches.pkl.gz'  ,content=piece)
                        
-                        os.remove(io.join_paths(detect_folder_path, filename+'_matches.pkl.gz'))
+                        #os.remove(io.join_paths(detect_folder_path, filename+'_matches.pkl.gz'))
 
                         return 
 
@@ -1137,6 +1194,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         submodel_path = os.path.join(req_node_path ,compute_filename)
 
                         print(submodel_path)
+		
 
                         submodel_path_match = os.path.join(submodel_path, 'matches')
 
@@ -1175,11 +1233,13 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
 
                         start = timer()
 
-                        sfm_compute_depthmaps(submodel_path, opensfm_config)
+                        #sfm_compute_depthmaps(submodel_path, opensfm_config)
+			export_ply_function(submodel_path, opensfm_config)
+
+        		end = timer()
+        		sfm_export_ply_time = end - start
 
 
-                        end = timer()
-                        sfm_compute_depthmaps_time = end - start
 
                         start = timer()
 
@@ -1226,9 +1286,67 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         odm_filterpoint_time = end - start
                         
                         start = timer()
+			
+			images_database_file = io.join_paths(submodel_path, 'images.json')
+			photo_list =  os.listdir(os.path.join(submodel_path, 'images'))
+	
+			photos = []
+			images_dir = io.join_paths(submodel_path,'images')
+			if not io.file_exists(images_database_file):
+			    files = photo_list
+			    
+			    if files:
+				# create ODMPhoto list
+				path_files = [io.join_paths(images_dir, f) for f in files]
+
+				
+				dataset_list = io.join_paths(submodel_path,'img_list')
+				with open(dataset_list, 'w') as dataset_list:
+				    log.ODM_INFO("Loading %s images" % len(path_files))
+				    for f in path_files:
+				        photos += [types.ODM_Photo(f)]
+				        dataset_list.write(photos[-1].filename + '\n')
+
+				# Save image database for faster restart
+				save_images_database(photos, images_database_file)
+			    else:
+				log.ODM_ERROR('Not enough supported images in %s' % images_dir)
+				exit(1)
+			else:
+			    # We have an images database, just load it
+			    photos = load_images_database(images_database_file)
+
+			log.ODM_INFO('Found %s usable images' % len(photos))
+
+			# Create reconstruction object
+			reconstruction = types.ODM_Reconstruction(photos) 
+			log.ODM_INFO('Found %s usable images' % len(photos))
+			from opendm import system 
+			system.mkdir_p(os.path.join(submodel_path, 'opensfm'))
+			# Create reconstruction object
+			reconstruction = types.ODM_Reconstruction(photos)
+			opensfm_interface.invent_reference_lla(submodel_path,photo_list ,os.path.join(submodel_path, 'opensfm'))
+	
+			system.mkdir_p(os.path.join(submodel_path,'odm_georeferencing'))
+			odm_georeferencing = io.join_paths(submodel_path, 'odm_georeferencing')
+			odm_georeferencing_coords = io.join_paths(odm_georeferencing, 'coords.txt')
+	
+			reconstruction.georeference_with_gps(photos, odm_georeferencing_coords, True)
+			odm_geo_proj = io.join_paths(odm_georeferencing, 'proj.txt')
+			reconstruction.save_proj_srs(odm_geo_proj) 
+			from opendm.osfm import OSFMContext 
+			octx = OSFMContext(os.path.join(submodel_path, 'opensfm'))
+			print('----------Export geocroods--------')
+			octx.run('export_geocoords --transformation --proj \'%s\'' % reconstruction.georef.proj4())
+			print('----------Export Geocoords Ppppp--------')
 
 
-                        odm_mesh_function(submodel_path,max_concurrency)
+			odm_mesh_function(opensfm_config,submodel_path, max_concurrency, reconstruction)
+
+
+
+
+                        #odm_mesh_function(submodel_path,max_concurrency)
 
                         end = timer()
                         odm_mesh_time = end - start
@@ -1240,12 +1358,29 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         end = timer()
                         odm_texturing_time = end - start
 
+			import orthophoto
+			start = timer()
+			import odm_georeferencing
+	
+	
+			import config
+			opendm_config = config.config()
+			tree = {}
+			odm_georeferencing.process(opendm_config, tree, reconstruction, submodel_path)
+			odm_georeferencing = io.join_paths(submodel_path, 'odm_georeferencing')
+			odm_georeferencing_coords = io.join_paths(odm_georeferencing, 'coords.txt')
+			reconstruction.georeference_with_gps(photos, odm_georeferencing_coords, True)
+
+			orthophoto.process(opendm_config,submodel_path, 4, reconstruction)
+			end = timer()
+                        odm_orthophoto_time = end - start
+
                         nodeid = str(nodeid)
                         timer_map['sfm_create_tracks_time-'+nodeid] = sfm_create_tracks_timer
                         timer_map['sfm_open_reconstruction-'+nodeid] = sfm_opensfm_reconstruction_time
                         timer_map['sfm_undistort-'+nodeid] = sfm_undistort_image_time
                         timer_map['sfm_export_visualsfm-'+nodeid] = sfm_export_visualsfm_time
-                        timer_map['sfm_compute_depthmap-'+nodeid] = sfm_compute_depthmaps_time
+                        timer_map['sfm_export_ply-'+nodeid] = sfm_export_ply_time
                         timer_map['mve_makescence_time-'+nodeid] = mve_makescene_function_time
                         timer_map['mve_dense_recon_time-'+nodeid] = mve_dense_reconstruction_time
                         timer_map['mve_scence2pset_time-'+nodeid] = mve_mve_scene2pset_time
@@ -1262,7 +1397,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         print('OpenSfm Reconstruction Total Time: ' + str(sfm_opensfm_reconstruction_time))
                         print('OpenSfm Undistort Image Total Time: ' + str(sfm_undistort_image_time))
                         print('OpenSfm Export Visual Sfm Total Time: ' + str(sfm_export_visualsfm_time))
-                        print('OpenSfm Compute DepthMaps Sfm Total Time: ' + str(sfm_compute_depthmaps_time))
+                        print('OpenSfm Export Ply Sfm Total Time: ' + str(sfm_export_ply_time))
                         print('Mve Makescene Sfm Total Time: ' + str(mve_makescene_function_time))
                         print('Mve Dense Reconstruction Sfm Total Time: ' + str(mve_dense_reconstruction_time))
                         print('Mve Scene 2 Pset Sfm Total Time: ' + str(mve_mve_scene2pset_time))
@@ -1270,28 +1405,50 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                         print('ODM Filterpoints Total Time: ' + str(odm_filterpoint_time))
                         print('ODM Mesh Total Time: ' + str(odm_mesh_time))
                         print('ODM Texturing Total Time: ' + str(odm_texturing_time))
-
+			print('ODM Orthophoto Total Time: ' + str(odm_orthophoto_time))
+			total_time = sfm_create_tracks_timer + sfm_opensfm_reconstruction_time + sfm_undistort_image_time + sfm_export_visualsfm_time + sfm_export_ply_time + mve_makescene_function_time + mve_dense_reconstruction_time +  mve_mve_scene2pset_time + mve_mve_cleanmesh_time + odm_filterpoint_time + odm_texturing_time + odm_orthophoto_time
+		        print(total_time)
 
                         
 
                         # send mesh ply
                         # send mesh dirty ply
-
+	               
 
                         mesh_folder_path = submodel_path+ '/mesh'
                         files = os.listdir(mesh_folder_path)
-                        more_files = os.listdir(os.path.join(submodel_path, 'mvs'))
+			orthophoto_folder = os.path.join(submodel_path, 'orthophoto')
+                        more_files = os.listdir(os.path.join(submodel_path, 'mvs'))	
                         files = files+more_files
+			more_files = os.listdir(os.path.join(submodel_path, 'orthophoto'))	
+			files = files+more_files
+			mvs_folder = os.path.join(submodel_path, 'mvs')
 
                         for each in files:
-			    if not (os.path.isfile(io.join_paths(mesh_folder_path, each))):
+			    if (os.path.isfile(io.join_paths(mesh_folder_path, each))):
+				
+		                    with open(io.join_paths(mesh_folder_path, each), 'rb') as f:
+		                                while True:
+		                                    piece = f.read(CHUNK_SIZE)
+		                                    if len(piece) == 0:
+		                                        break
+		                                    yield sendFile_pb2.NewChunk(filename=each  ,content=piece)
+			    elif (os.path.isfile(os.path.join(mvs_folder, each))):
+					with open(io.join_paths(mvs_folder, each), 'rb') as f:
+		                                while True:
+		                                    piece = f.read(CHUNK_SIZE)
+		                                    if len(piece) == 0:
+		                                        break
+		                                    yield sendFile_pb2.NewChunk(filename=each  ,content=piece)
+ 			    elif (os.path.isfile(os.path.join(orthophoto_folder, each))):
+					with open(io.join_paths(orthophoto_folder, each), 'rb') as f:
+		                                while True:
+		                                    piece = f.read(CHUNK_SIZE)
+		                                    if len(piece) == 0:
+		                                        break
+		                                    yield sendFile_pb2.NewChunk(filename=each  ,content=piece)
+			    else:
 				continue
-                            with open(io.join_paths(mesh_folder_path, each), 'rb') as f:
-                                        while True:
-                                            piece = f.read(CHUNK_SIZE)
-                                            if len(piece) == 0:
-                                                break
-                                            yield sendFile_pb2.NewChunk(filename=each  ,content=piece)
 
 
                         print('after')
@@ -1394,6 +1551,7 @@ class FileServer(sendFile_pb2_grpc.FileServiceServicer):
                 
 
         self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=4), options = [
+	    ('grpc.max_message_length', 50 * 1024 * 1024),
             ('grpc.max_send_message_length', 50 * 1024 * 1024),
             ('grpc.max_receive_message_length', 50 * 1024 * 1024)
         ])
